@@ -1,0 +1,162 @@
+---
+title: "Machine Learning"
+author: "Michael Baldassaro"
+date: "6/22/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Executive Summary
+The goal of this project is to use machine learning to predict the manner in which barbell lifts (correctly or incorrectly, in five different ways ["classe" = A, B, C, D, E]). Data was collected from six participants using accelerometers on the belt, forearm, arm, and dumbell. Given the nature of the data, two different machine learning classification methods were applied and tested: CART (Random Forest pre-processed using Principal Component Analysis) & SVM (with normalized data). The performance of the Random Forest-PCA model yielded a remarkable 99.4% accuracy rate when tested on the validation set. The model was then used to predict the manner in which 20 individuals may have performed barbell lifts.    
+
+####About the Data
+The data source used to perform this machine learning project is the "Weightlifting Exercise Dataset(Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.". The original data is available via [Groupware@LES](http://groupware.les.inf.puc-rio.br/har#wle_paper_section) and licensed under CC-BY-SA. 
+
+##Step-by-Step Instructions
+
+###Step 1. Load the Required Dependencies
+The following dependencies are required in order to perform data processing, exploration, and modeling:     
+
+```{r require, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+require("caret")
+require("e1071")
+require("randomForest")
+require("gbm")
+require("Hmisc")
+require("corrplot")
+```
+
+###Step 2. Gathering the Data
+
+```{r read, echo=TRUE}
+training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+There are 19622 observations and 160 variables in the training set. 
+There are 20 observations and 160 variables in the testing set. 
+ 
+##Step 3. Preparing the Data 
+
+Remove columns that don't relate to accelerometer measurements. Specifically, the first seven columns are metadata that describe the participants and windows in which measurements were taken (e.g. index, name, timestamps, window).
+
+```{r clean4, echo=TRUE}
+training <- training[,-c(1:7)]
+testing <- testing[, -c(1:7)]
+```
+
+Identify which variables contain "NA" observation values in training & test sets
+
+```{r clean, echo=TRUE}
+trainingNA <- colnames(training)[colSums(is.na(training)) > 0] 
+testingNA <- colnames(testing)[colSums(is.na(testing)) > 0] 
+```
+
+There are 67 variables that contain NA values in the training set. 
+There are 100 variables that contain NA values in the testing set.
+
+Identify which variables contain all "NA" values, if any. 
+
+```{r clean2, echo=TRUE}
+trainingNAall <- colnames(training)[colSums(is.na(training)) == nrow(training)] 
+testingNAall <- colnames(testing)[colSums(is.na(testing)) == nrow(testing)]
+```
+
+There are no variables that contain all "NA" values in the training set.
+There are 100 variables that contain all "NA" values in the testing set.
+
+Identify variables that have all NA values in testing set and remove from both training and testing sets. In addition, remove any observations in the testing and training sets that contain NA values which may adversely affect modeling.  
+
+```{r clean3, echo=TRUE}
+removeTraining <- names(training) %in% testingNAall
+cleanTraining <- training[!removeTraining]
+training <- na.omit(cleanTraining)
+removeTesting <- names(testing) %in% testingNAall
+cleanTesting <- testing[!removeTesting]
+testing <- na.omit(cleanTesting)
+```
+
+There are now 19622 complete observations and 53 variables in the training set.
+There are now 20 complete observations and 53 variables in the testing set.
+ 
+###Step 4. Create a Validation Set for Crossvalidation Purposes
+
+For reproducibility purposes, set and split the training set into a training set (75%) and validation set (25%).
+```{r cv, echo=TRUE}
+set.seed(12345)
+inTrain <- createDataPartition(y=training$classe, p=0.75, list=F)
+trainset <- training[inTrain,]
+validation <- training[-inTrain,]
+training <- trainset
+```
+
+###Step 5. Explore the Training Set for Possible Dimensionality Reduction
+
+Given the high multidimensional nature of the dataset, create a correlation matrix to possibly correlated variables. 
+
+```{r plot, echo=TRUE}
+corrplot(cor(training[, c(1:52)]), method ="circle", type="lower", tl.cex = 0.5)
+```
+
+The plot of the correlation matrix highlights several strong positive and negative correlations, suggesting that dimension reduction, and in turn model improvement, can be acheived through Principal Component Analysis or Singular Value Decomposition.
+ 
+###Step 6. Fit Appropriate Models on the Training Set
+Given that the predicted variable is a discrete multi-nominal variable, either a Classification & Regression Tree (CART -- in this case a Random Forest) or Support Vector Machine (SVM) model would be appropriate.
+
+####Random Forest Model Fitting (PCA)
+
+```{r modrf, echo=TRUE}
+modrf <- randomForest(classe ~ ., data=training, trControl=trainControl(method="pca"))
+```
+
+####SVM Model Fitting
+
+```{r modsvm, echo=TRUE}
+modsvm <- svm(classe ~ ., data=training)
+```
+
+###Step 7. Predict Using the Validation Set 
+Now that the models have been fitted, both can be tested on the validation datasets before being applied to the testing set.
+
+```{r predict, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+predrf <- predict(modrf, validation)
+predsvm <- predict(modsvm, validation)
+```
+
+##Step 8. Construct Confusion Matrices and Extract Accuracy Levels
+Confusion matrices can be constructed using the predictions generated by the models and tested on the validation set. The accuracy levels can be extracted and multiplied by 100 to generate a prective accuracy percentage rate. 
+
+####Random Forest (PCA) Model Accuracy
+
+```{r confuse, echo=TRUE}
+confusionMatrix(predrf, validation$classe)$overall[1] * 100
+```
+
+####SVM Model Accuracy
+
+```{r confusesvm, echo=TRUE}
+confusionMatrix(predsvm, validation$classe)$overall[1] *100
+```
+
+Based on accuracy rates, both models perform well however the accuracy rate of the Random Forest (PCA) model is superior. It can be applied to predict the classes in the testing dataset with a high level of confidence. 
+
+##Step 9. Get Expected Out of Sample Error Using Validation Set
+The expected out of sample accuracy rate can be obtained using the validation dataset and multiplying the resulting error by 100. 
+
+```{r error, echo=TRUE}
+accuracy <- postResample(predrf, validation$classe)
+error <- 1 - as.numeric(confusionMatrix(predrf, validation$classe)$overall[1])
+error * 100
+```
+
+The expected out of sample error rate from the Random Forest (PCA) model is 0.5% 
+
+##Step 10. Predict Classes on the Testing Dataset
+Using the Random Forest PCA model, classes can be predicted for each of the 20 observations in the training data set.   
+
+```{r test, echo=TRUE}
+predict(modrf, testing)
+```
